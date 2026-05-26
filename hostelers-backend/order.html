@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Place Order</title>
+</head>
+
+<body>
+
+<h1>Order Food 🍽️</h1>
+
+<input type="text" id="user_id" placeholder="User ID"><br><br>
+<input type="text" id="item_name" placeholder="Item Name"><br><br>
+<input type="number" id="quantity" placeholder="Quantity"><br><br>
+
+<button onclick="placeOrder()">Place Order (Razorpay)</button>
+<br><br>
+<button onclick="placeOrderUPI()" style="background-color: #5f259f; color: white;">Pay directly with PhonePe / GPay</button>
+
+<p id="msg"></p>
+
+<!-- 🔊 SOUND HERE (outside script) -->
+<audio id="orderSound" preload="auto">
+    <source src="sound.mp3" type="audio/mpeg">
+</audio>
+
+<script>
+function placeOrder(){
+
+  const user_id = document.getElementById("user_id").value;
+  const item_name = document.getElementById("item_name").value;
+  const quantity = document.getElementById("quantity").value;
+  const customer_name = localStorage.getItem("customer_name") || "venkateswara rao";
+
+  // 1) First save order in MySQL
+  fetch("http://localhost:5000/orders",{
+    method:"POST",
+    headers:{
+      "Content-Type":"application/json"
+    },
+    body:JSON.stringify({
+      user_id:user_id,
+      item_name:item_name,
+      quantity:quantity,
+      customer_name:customer_name,
+      status:"pending"
+    })
+  })
+  .then(res=>res.text())
+  .then(data=>{
+    alert("Order saved successfully ✅");
+
+    // 2) Then create Razorpay order
+    return fetch("http://localhost:5000/create-order",{
+      method:"POST"
+    });
+  })
+  .then(res=>res.json())
+  .then(order=>{
+    var options = {
+      key:"rzp_test_SiTQSfwJUiF3S7", // your key id
+      amount:order.amount,
+      currency:order.currency,
+      name:"Hostel Food Order",
+      description:"Food Payment",
+      order_id:order.id,
+
+      handler:function(response){
+        alert("Payment Successful ✅");
+      },
+
+      theme:{
+        color:"#3399cc"
+      }
+    };
+
+    var rzp1 = new Razorpay(options);
+    rzp1.open();
+  })
+  .catch(err=>{
+    console.log(err);
+    alert("Error occurred");
+  });
+}
+
+function placeOrderUPI() {
+  const user_id = document.getElementById("user_id").value;
+  const item_name = document.getElementById("item_name").value;
+  const quantity = document.getElementById("quantity").value;
+  const customer_name = localStorage.getItem("customer_name") || "venkateswara rao";
+
+  // Replace this with your actual UPI ID (e.g., phone_number@ybl)
+  const myUpiId = "your_number@upi"; 
+  const amountToPay = 100; // Put your dynamic amount logic here
+
+  // 1) Save order in MySQL
+  fetch("http://localhost:5000/orders",{
+    method:"POST",
+    headers:{ "Content-Type":"application/json" },
+    body:JSON.stringify({
+      user_id:user_id,
+      item_name:item_name,
+      quantity:quantity,
+      customer_name:customer_name,
+      status:"pending"
+    })
+  })
+  .then(res=>res.text())
+  .then(data=>{
+    alert("Order saved! Redirecting to UPI App... ✅");
+    
+    // 2) Generate Direct UPI Intent Link
+    // Note: This link will open apps like PhonePe, GPay automatically on Mobile devices.
+    const upiLink = `upi://pay?pa=${myUpiId}&pn=Hostel%20Food&am=${amountToPay}&cu=INR&tn=Food%20Order`;
+    
+    window.location.href = upiLink;
+  })
+  .catch(err=>{
+    console.log(err);
+    alert("Error occurred");
+  });
+}
+</script>
+
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+
+</body>
+</html>                   

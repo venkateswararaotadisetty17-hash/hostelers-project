@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Admin Orders</title>
+</head>
+
+<body>
+
+<!-- 🔊 SOUND FILE -->
+<audio id="orderSound">
+  <source src="beep-07.wav" type="audio/wav">
+</audio>
+
+<h1>Orders List</h1>
+<table boarder="1" id="ordersTable">
+  <tr>
+    <th>ID</th>
+    <th>User</th>
+    <th>Item</th>
+    <th>Qty</th>
+    <th>Status</th>
+    <th>Time</th>
+  </tr>
+  <tbody id="tableBody"></tbody>
+</table>
+
+<script>
+let lastCount = 0;
+let soundEnabled = false;
+let firstLoad = true;
+ 
+
+// 🔊 Enable button
+// only once
+
+const btn = document.createElement("button");
+btn.innerText = "Enable Sound 🔊";
+
+btn.style.position = "fixed";
+btn.style.top = "20px";
+btn.style.left = "20px";
+btn.style.padding = "10px";
+btn.style.background = "green";
+btn.style.color = "white";
+btn.style.zIndex = "9999";
+
+document.body.appendChild(btn);
+
+btn.addEventListener("click", () => {
+  const sound = document.getElementById("orderSound");
+
+  sound.play()
+    .then(() => {
+      console.log("Sound played");
+    })
+    .catch(err => {
+      console.log("Error:", err);
+    })
+    .finally(() => {
+      // 🔥 ALWAYS RUN
+      sound.pause();
+      sound.currentTime = 0;
+
+      soundEnabled = true;
+      btn.remove();
+
+      console.log("Button removed ✅");
+    });
+});
+function loadOrders() {
+
+  fetch("http://localhost:5000/orders")   // ✅ THIS LINE MISSING
+    .then(res => res.json())
+    .then(data => {
+
+      const table = document.getElementById("ordersTable");
+
+      // clear + header
+      let html = `
+        <tr>
+          
+          <th>User</th>
+          <th>Item</th>
+          <th>Qty</th>
+          <th>Status</th>
+          <th>Time</th>
+        </tr>
+      `;
+
+      // rows
+      data.forEach(order => {
+        html += `
+          <tr>
+            
+            <td>${order.customer_name}</td>
+            <td>${order.item_name}</td>
+            <td>${order.quantity}</td>
+            <td>${order.status}</td>
+            <td>${new Date(order.order_time).toLocaleString()}</td>
+          </tr>
+        `;
+      });
+
+      table.innerHTML = html;
+
+      // 🔔 NEW ORDER ALERT
+      if (!firstLoad && data.length > lastCount) {
+        alert("🔔 New Order Received!");
+      }
+
+      // 🔊 SOUND
+      if (soundEnabled) {
+        const sound = document.getElementById("orderSound");
+        sound.currentTime = 0;
+        sound.play().catch(err => console.log(err));
+      }
+
+      lastCount = data.length;
+      firstLoad = false;
+
+    })
+    .catch(err => console.log(err));
+}
+
+
+// 🔁 every 3 seconds
+setInterval(loadOrders, 3000);
+
+// first load
+loadOrders();
+</script>         

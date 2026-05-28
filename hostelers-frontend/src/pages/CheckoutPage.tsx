@@ -26,6 +26,7 @@ const CheckoutPage = () => {
   const { addOrder } = useStore();
   const [form, setForm] = useState({ name: "", phone: "", address: "", location: "" });
   const [detectingLocation, setDetectingLocation] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   if (items.length === 0) {
     navigate("/cart");
@@ -60,138 +61,162 @@ const CheckoutPage = () => {
     );
   };
   
-  const handleRazorpay = async() => {
-  // validation
-  if (!form.name || !form.phone || !form.address) {
-    toast.error("Please fill all required fields");
-    return;
-  }
-  // order create
-const order = {
-  id: "ORD-" + Date.now(),
-  customerName: form.name,
-  phone: form.phone,
-  address: form.address,
-  location: form.location,
-  upiId: upiId,
+  const handleRazorpay = async () => {
+    // validation
+    if (!form.name || !form.phone || !form.address) {
+      toast.error("Please fill all required fields");
+      return;
+    }
+    
+    if (form.phone.length < 10) {
+      toast.error("Please enter a valid phone number");
+      return;
+    }
 
-  items: items.map(i => ({
-    name: i.name,
-    quantity: i.quantity,
-    price: i.price
-  })),
+    setLoading(true);
 
-  subtotal,
-  gst,
-  delivery: totalDelivery,
-  total,
-  status: "placed",
-  timestamp: Date.now(),
-};
-
-try {
-  // create razorpay order from backend
-  const res = await fetch(`${API_URL}/create-order`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      amount: Math.round(total * 100)
-    }),
-  });
-
-  if (!res.ok) {
-    throw new Error("Failed to create order on backend");
-  }
-
-  const data = await res.json();
-  console.log("SUCCESS:", data);
-
-// razorpay options
-const options = {
-  key: import.meta.env.VITE_RAZORPAY_KEY_ID || "rzp_test_SiTQSfwJUiF3S7",
-  amount: data.amount,
-  currency: data.currency,
-  order_id: data.id,
-  name: "Hostelers",
-
-  handler: async function (response: any) {
-
-    addOrder(order);
-
-    const itemsText = items.map(i => `${i.name} (x${i.quantity})`).join(", ");
-    const totalQuantity = items.reduce((sum, i) => sum + i.quantity, 0);
+    const order = {
+      id: "ORD-" + Date.now(),
+      customerName: form.name,
+      phone: form.phone,
+      address: form.address,
+      location: form.location,
+      upiId: upiId,
+      items: items.map((i) => ({
+        name: i.name,
+        quantity: i.quantity,
+        price: i.price,
+      })),
+      subtotal,
+      gst,
+      delivery: totalDelivery,
+      total,
+      status: "placed",
+      timestamp: Date.now(),
+    };
 
     try {
-      // Verify Payment
-      const verifyRes = await fetch(`${API_URL}/verify-payment`, {
+      // 1. Create Razorpay order from backend
+      const res = await fetch(`${API_URL}/create-order`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({
-          razorpay_order_id: response.razorpay_order_id,
-          razorpay_payment_id: response.razorpay_payment_id,
-          razorpay_signature: response.razorpay_signature,
-        })
+          amount: Math.round(total * 100), // Razorpay accepts paise
+        }),
       });
-      const verifyData = await verifyRes.json();
-      if (!verifyData.success) {
-        toast.error("Payment verification failed!");
-        return;
+
+      if (!res.ok) {
+        throw new Error("Failed to create order on backend");
       }
 
-      // Save Order to Database (Backend will automatically trigger WhatsApp notification)
-      await fetch(`${API_URL}/orders`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          order_id: order.id,
-          user_id: 1, // Optional: add user ID logic here
-          customer_name: form.name,
-          phone: form.phone,
-          address: form.address,
-          item_name: itemsText,
-          quantity: totalQuantity,
-          total_amount: total,
-          status: "Paid",
-          items: order.items // Send full items array for the WhatsApp message
-        })
-      });
+      const data = await res.json();
+      console.log("SUCCESS:", data);
 
-      clearCart();
-      toast.success("Payment success and order saved!");
-    } catch (err: any) {
-      console.error("Failed to complete order workflow", err);
-      toast.error("Order processed with some errors: " + err.message);
+      // 2. Setup Razorpay gateway
+      const options = {
+        key: import.meta.env.VITE_RAZORPAY_KEY_ID || "rzp_test_SiTQSfwJUiF3S7",
+        amount: data.amount,
+        currency: data.currency,
+        order_id: data.id,
+        name: "Hostelers",
+        description: "Payment for your order",
+        handler: async function (response: any) {
+          try {
+            // 3. Verify Payment
+            const verifyRes = await fetch(`${API_URL}/verify-payment`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature,
+              })
+            });
+            const verifyData = await verifyRes.json();
+            
+            if (!verifyData.success) {
+              toast.error("Payment verification failed!");
+              return;
+            }
+
+            const itemsText = items.map(i => `${i.name} (x${i.quantity})`).join(", ");
+            const totalQuantity = items.reduce((sum, i) => sum + i.quantity, 0);
+
+            // 4. Save Order to Database (Backend triggers WhatsApp notification)
+            const saveRes = await fetch(`${API_URL}/orders`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                order_id: order.id,
+                user_id: 1, // Optional user ID logic
+                customer_name: form.name,
+                phone: form.phone,
+                address: form.address,
+                item_name: itemsText,
+                quantity: totalQuantity,
+                total_amount: total,
+                status: "Paid",
+                items: order.items
+              })
+            });
+
+            if (!saveRes.ok) {
+              throw new Error("Failed to save order to database");
+            }
+
+            addOrder(order);
+            if (typeof playOrderSound === 'function') {
+                playOrderSound();
+            }
+            clearCart();
+            toast.success("Payment success and order saved!");
+            navigate("/cart"); // Usually handles empty cart redirects
+          } catch (err: any) {
+            console.error("Failed to complete order workflow", err);
+            toast.error("Order processed with some errors: " + err.message);
+          }
+        },
+        prefill: {
+          name: form.name,
+          contact: form.phone,
+        },
+        theme: {
+          color: "#000000" // Use primary color of the app
+        }
+      };
+
+      // 5. Dynamically load Razorpay if missing
+      if (!(window as any).Razorpay) {
+        const script = document.createElement("script");
+        script.src = "https://checkout.razorpay.com/v1/checkout.js";
+        script.async = true;
+        script.onload = () => {
+          const rzp = new (window as any).Razorpay(options);
+          rzp.on('payment.failed', function (response: any) {
+            toast.error(response.error.description || "Payment failed");
+          });
+          rzp.open();
+        };
+        script.onerror = () => {
+          toast.error("Failed to load Razorpay SDK. Please check your connection.");
+        };
+        document.body.appendChild(script);
+      } else {
+        const rzp = new (window as any).Razorpay(options);
+        rzp.on('payment.failed', function (response: any) {
+          toast.error(response.error.description || "Payment failed");
+        });
+        rzp.open();
+      }
+    } catch (error: any) {
+      console.error("Error initiating payment:", error);
+      toast.error(error.message || "Failed to initiate payment. Please try again.");
+    } finally {
+      setLoading(false);
     }
-  }
-};
-
-  // Dynamically load Razorpay if missing
-  if (!(window as any).Razorpay) {
-    const script = document.createElement("script");
-    script.src = "https://checkout.razorpay.com/v1/checkout.js";
-    script.async = true;
-    script.onload = () => {
-      const rzp = new (window as any).Razorpay(options);
-      rzp.on('payment.failed', function (response: any) {
-        toast.error(response.error.description || "Payment failed");
-      });
-      rzp.open();
-    };
-    document.body.appendChild(script);
-  } else {
-    const rzp = new (window as any).Razorpay(options);
-    rzp.on('payment.failed', function (response: any) {
-      toast.error(response.error.description || "Payment failed");
-    });
-    rzp.open();
-  }
-} catch (error: any) {
-  console.error("Error initiating payment:", error);
-  toast.error(error.message || "Failed to initiate payment. Please try again.");
-}
-};
+  };
 
   return (
     <div className="min-h-screen pb-20 bg-background">
@@ -230,7 +255,7 @@ const options = {
            
           </div>
         </div>
-         <Button onClick={handleRazorpay}>Place Now</Button>
+         <Button onClick={handleRazorpay} disabled={loading}>{loading ? "Processing..." : "Place Now"}</Button>
 
         {/* UPI Payment */}
         <div className="bg-card rounded-xl p-4 border border-border space-y-3">
@@ -280,13 +305,11 @@ const options = {
             <span className="text-primary">₹{total.toFixed(2)}</span>
           </div>
         </div>
-       <Button className="w-full h-12 text-base" onClick={handleRazorpay}>
- Pay via UPI - ₹{total.toFixed(2)}
+       <Button className="w-full h-12 text-base" onClick={handleRazorpay} disabled={loading}>
+ {loading ? "Processing..." : `Pay via UPI - ₹${total.toFixed(2)}`}
 </Button>
 
-<Button className="w-full h-12 text-base mt-3" onClick={handleRazorpay}>
- Test Order Creation
-</Button>
+
       </div>
     </div>
   );

@@ -6,7 +6,7 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const axios = require("axios");
 const crypto = require("crypto");
-const { sendOrderNotification } = require("./services/whatsappService");
+const { sendOrderNotification } = require("./whatsappService");
 const http = require("http");
 const { Server } = require("socket.io");
 
